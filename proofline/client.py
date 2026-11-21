@@ -545,6 +545,8 @@ class ProoflineClient(Operations):
         *,
         timeout: float = 300,
         head_commit_sha: str | None = None,
+        poll_interval: float = 5,
+        max_poll_interval: float = 60,
     ) -> ReviewOutcome:
         """Wait for recorded review completion or return TIMED_OUT.
 
@@ -553,15 +555,22 @@ class ProoflineClient(Operations):
 
         head_commit_sha holds the outcome to that commit. A review pinned to
         another head ends the wait on that read and is never COMPLETED.
+        Polling doubles from poll_interval up to max_poll_interval, in seconds.
         """
 
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("The review timeout must be a finite nonnegative number of seconds.")
+        if (
+            not math.isfinite(poll_interval)
+            or not math.isfinite(max_poll_interval)
+            or not 0 < poll_interval <= max_poll_interval
+        ):
+            raise ValueError("Polling intervals must be finite, positive, and in ascending order.")
         _head_commit(head_commit_sha)
         url = _review_url(self._base_url, organization_id, review_id)
         last: CustomerReviewDetail | None = None
         deadline = _transport.DEADLINE.set(monotonic() + timeout)
-        interval = 5.0
+        interval = poll_interval
         try:
             while (_transport.remaining() or 0) > 0:
                 try:
@@ -576,7 +585,7 @@ class ProoflineClient(Operations):
                 if result is not None:
                     return result
                 sleep(min(interval, _transport.remaining() or 0))
-                interval = min(60, interval * 2)
+                interval = min(max_poll_interval, interval * 2)
             timed_out = outcome(last, url, "TIMED_OUT", head_commit_sha=head_commit_sha)
             return timed_out or ReviewOutcome("TIMED_OUT", url)
         finally:
@@ -940,14 +949,22 @@ class AsyncProoflineClient(AsyncOperations):
         *,
         timeout: float = 300,
         head_commit_sha: str | None = None,
+        poll_interval: float = 5,
+        max_poll_interval: float = 60,
     ) -> ReviewOutcome:
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("The review timeout must be a finite nonnegative number of seconds.")
+        if (
+            not math.isfinite(poll_interval)
+            or not math.isfinite(max_poll_interval)
+            or not 0 < poll_interval <= max_poll_interval
+        ):
+            raise ValueError("Polling intervals must be finite, positive, and in ascending order.")
         _head_commit(head_commit_sha)
         url = _review_url(self._base_url, organization_id, review_id)
         last: CustomerReviewDetail | None = None
         deadline = _transport.DEADLINE.set(monotonic() + timeout)
-        interval = 5.0
+        interval = poll_interval
         try:
             while (_transport.remaining() or 0) > 0:
                 try:
@@ -962,7 +979,7 @@ class AsyncProoflineClient(AsyncOperations):
                 if result is not None:
                     return result
                 await async_sleep(min(interval, _transport.remaining() or 0))
-                interval = min(60, interval * 2)
+                interval = min(max_poll_interval, interval * 2)
             timed_out = outcome(last, url, "TIMED_OUT", head_commit_sha=head_commit_sha)
             return timed_out or ReviewOutcome("TIMED_OUT", url)
         finally:

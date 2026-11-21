@@ -1415,6 +1415,31 @@ async def test_polling_backoff_and_timeout_keep_review_url_and_last_record(
 
 
 @MODES
+async def test_custom_review_polling_cadence(
+    mode: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock(monkeypatch)
+    body = review("RUNNING")
+    body.update(assessment_count=0, assessments=[], code_assessment=code_assessment("RUNNING"))
+    with Server(lambda request, index: Reply(body=body)) as server:
+        async with session(mode, server.url) as client:
+            for initial, maximum in [(0, 5), (5, 4), (1, float("inf"))]:
+                with pytest.raises(ValueError, match="Polling intervals"):
+                    await call(
+                        client, "wait_for_review", ORG, REVIEW,
+                        poll_interval=initial, max_poll_interval=maximum,
+                    )
+            assert server.requests == []
+            result = await call(
+                client, "wait_for_review", ORG, REVIEW,
+                timeout=12, poll_interval=2, max_poll_interval=3,
+            )
+            assert result.status == "TIMED_OUT"
+        assert clock.delays == [2, 3, 3, 3, 1]
+        assert len(server.requests) == 5
+
+
+@MODES
 async def test_retry_after_is_bounded_by_wait_deadline(
     mode: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
